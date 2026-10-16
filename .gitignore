@@ -1,3 +1,8 @@
 node_modules/
 .pba/
-.opencode/
+# Track only the plugin auto-discovery entry; everything else under
+# .opencode/ stays local (installed dependencies, generated config).
+.opencode/*
+!.opencode/plugins
+.opencode/plugins/*
+!.opencode/plugins/multi-review.ts

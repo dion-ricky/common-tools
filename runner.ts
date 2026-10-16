@@ -2,9 +2,13 @@ import type { Plugin } from "@opencode/plugin"
 import { getReviewer, REVIEWER_IDS, REVIEWERS, type ReviewInput } from "./reviewers"
 
 /**
- * Verified against the installed `@opencode/plugin` 2.x type declarations:
- * - `ctx.session.create(input)` accepts `{ title, parentID }` (`SessionCreateInput`);
- *   `parentID` links the reviewer session to the invoking session.
+ * Verified against the installed SDK type declarations (generated in
+ * `@opencode/client`, re-exported through `@opencode/plugin`'s `SessionDomain`):
+ * - `ctx.session.create(input)` accepts `{ title, parentID, model }` (`SessionCreateInput`);
+ *   `parentID` links the reviewer session to the invoking session and `model`
+ *   (`{ providerID, id, variant? }`) pins the child session's model.
+ * - `ctx.session.get({ sessionID })` returns `SessionInfo`, whose optional
+ *   `model` is the invoking session's selected model.
  * - `ctx.session.prompt({ sessionID, text })`, `ctx.session.wait({ sessionID })`,
  *   `ctx.session.context({ sessionID })` (returns `SessionMessageInfo[]`).
  * - Assistant messages carry `content: Array<{ type: "text", text } | reasoning | tool>`,
@@ -44,6 +48,11 @@ export interface RunReviewOptions {
   parentSessionID?: string
   /** Abort signal from the tool execution context, if any. */
   signal?: AbortSignal
+  /**
+   * Model reference for reviewer sessions; internal — set by `runReview` from
+   * the invoking session's selection (see `resolveParentModel`).
+   */
+  model?: SessionModelRef
 }
 
 export interface ReviewerResult {
@@ -134,6 +143,34 @@ function extractFinalAssistantText(messages: readonly unknown[]): string | undef
   return undefined
 }
 
+/**
+ * Model reference accepted by `ctx.session.create`, derived from the SDK types
+ * (`@opencode/client`'s generated `SessionCreateInput["model"]`) so the shape
+ * cannot drift from the host.
+ */
+type SessionModelRef = NonNullable<NonNullable<Parameters<Plugin.Context["session"]["create"]>[0]>["model"]>
+
+/**
+ * Resolve the model selected in the invoking session, so reviewer sessions can
+ * run on the same model — including the same variant, so reviewers match the
+ * parent's exact model/variant combination. Falls back to `undefined` (session
+ * default) when the parent has no model set yet or the lookup fails.
+ */
+async function resolveParentModel(ctx: Plugin.Context, sessionID?: string): Promise<SessionModelRef | undefined> {
+  if (!sessionID) return undefined
+  try {
+    const parent = await ctx.session.get({ sessionID })
+    return parent.model
+      ? { providerID: parent.model.providerID, id: parent.model.id, variant: parent.model.variant }
+      : undefined
+  } catch (error) {
+    // Best-effort pin: a failing lookup must not break the review, but make the
+    // degradation visible so it is distinguishable from "parent has no model set".
+    console.log(`[multi-review] parent model lookup failed, reviewers will use the session default: ${errorMessage(error)}`)
+    return undefined
+  }
+}
+
 /** Run one reviewer in a fresh child session and capture its result or failure. */
 async function runReviewer(
   ctx: Plugin.Context,
@@ -148,6 +185,7 @@ async function runReviewer(
     const created = await ctx.session.create({
       title: `multi-review (${reviewer.id})`,
       parentID: opts.parentSessionID,
+      model: opts.model,
     })
     try {
       await ctx.session.prompt({ sessionID: created.id, text: reviewer.buildPrompt(input) })
@@ -201,9 +239,16 @@ export async function runReview(ctx: Plugin.Context, opts: RunReviewOptions): Pr
     spec: opts.spec,
   }
 
+  const runOpts: RunReviewOptions = {
+    ...opts,
+    // Resolved once per run: one lookup for N reviewers, and all reviewers in a
+    // run execute on a consistent model.
+    model: await resolveParentModel(ctx, opts.parentSessionID),
+  }
+
   const settled = await Promise.allSettled(
     selected.map((reviewerId) =>
-      withTimeout(runReviewer(ctx, reviewerId, input, opts), getReviewer(reviewerId)?.label ?? reviewerId),
+      withTimeout(runReviewer(ctx, reviewerId, input, runOpts), getReviewer(reviewerId)?.label ?? reviewerId),
     ),
   )
 

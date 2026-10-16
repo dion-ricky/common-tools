@@ -1,4 +1,5 @@
 {
-  "$schema": "https://opencode.ai/config.json",
-  "plugins": ["."]
+  // No "plugins" entry needed: the plugin is loaded via auto-discovery from
+  // .opencode/plugins/multi-review.ts (which re-exports the repo root sources).
+  "$schema": "https://opencode.ai/config.json"
 }

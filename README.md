@@ -16,13 +16,13 @@ Every reviewer follows a shared output contract: numbered, severity-tagged findi
 
 ## Entry points
 
-### 1. `/review` command
+### 1. `/multi-review` command
 
 ```
-/review implement the retry logic for the payment webhook
+/multi-review implement the retry logic for the payment webhook
 ```
 
-The command's prompt text (if any) is treated as the **task spec** for the `spec` reviewer. Without prompt text, the reviewers look at the current working diff. The consolidated report is posted back to your session as a message.
+The command submits a prompt to the invoking session that instructs it to call the `multi_review` tool and relay the report, so the session **stays busy** while reviewers run (the review executes inside the session's own agent loop) instead of idling. The command's prompt text (if any) is treated as the **task spec** for the `spec` reviewer; without prompt text, the reviewers look at the current working diff. If the agent loop cannot run (e.g. the session is already busy), the plugin falls back to running the review directly and posting the report.
 
 ### 2. `multi_review` tool (for agents)
 
@@ -63,6 +63,7 @@ The tool returns the same consolidated markdown report as the command.
 ## Session behavior
 
 - Each reviewer runs in a **fresh child session** (created with `ctx.session.create`, linked to the invoking session via `parentID`) driven by its specialized prompt — clean context, full read/grep tool access so it can explore the code, not just read the diff.
+- Reviewer sessions run on the **same model and variant as the invoking session**: the parent's selected model is read via `ctx.session.get` and passed to `ctx.session.create`. If the parent has no model set yet (or the lookup fails), reviewers fall back to the session default model.
 - Reviewer sessions are **kept, not removed**, so you can open them to inspect the reviewer's reasoning. Their session IDs are included in the report.
 - Reviewers run concurrently (`Promise.allSettled`).
 
@@ -89,51 +90,20 @@ That's it — the new id is immediately valid in the `multi_review` tool input, 
 
 ## Use in another repo
 
-This repo is a self-contained OpenCode plugin package (`opencode-multi-review`). The quickest way to install it into another project:
+This repo is a self-contained OpenCode plugin package (`opencode-multi-review`). To install it into another project, **vendor a copy** with the installer:
 
 ```bash
-# reference this repo by path (stays in sync with changes here)
-bash /Users/saputrad/repo/playground/common-tools/install.sh /path/to/project
-
-# or vendor a snapshot into the target's .opencode/plugins/multi-review/
-bash /Users/saputrad/repo/playground/common-tools/install.sh /path/to/project --copy
+bash /path/to/common-tools/install.sh /path/to/project
 ```
 
-The installer merges the plugin into the target's `opencode.json(c)` (JSONC-aware, backs up existing config). Or configure it manually:
+The installer:
 
-```jsonc
-{
-  "plugins": [
-    { "package": "file:///Users/saputrad/repo/playground/common-tools" }
-  ]
-}
-```
+1. Copies the plugin source into `<project>/.opencode/plugins/multi-review/` — an immediate plugin package directory that OpenCode **auto-discovers** at startup, so no `plugins` config entry is needed or written.
+2. Ensures `<project>/.opencode/package.json` declares the `@opencode/plugin` dependency (OpenCode runs `bun install` in that directory at startup).
 
-**From a git remote** (once pushed):
+The vendored copy is self-contained: it keeps working even if this repo moves. Re-run the installer to refresh the snapshot after changes here.
 
-```jsonc
-{
-  "plugins": ["git+https://github.com/you/common-tools"]
-}
-```
-
-**From npm** (if published):
-
-```jsonc
-{
-  "plugins": ["opencode-multi-review"]
-}
-```
-
-Optional per-install options (read via `ctx.options`):
-
-```jsonc
-{
-  "plugins": [
-    { "package": "opencode-multi-review", "options": { "reviewers": ["bugs", "security"] } }
-  ]
-}
-```
+Alternatively, copy the plugin files (`index.ts`, `reviewers.ts`, `runner.ts`, `report.ts`, `package.json`) anywhere under the target's `.opencode/plugins/` yourself — any direct `.ts`/`.js` file or immediate package directory in that tree is auto-discovered.
 
 ## Development
 
@@ -148,4 +118,4 @@ npm run typecheck
 opencode service restart
 ```
 
-The plugin source lives at the repo root (`index.ts` + flat modules) and is published as the `opencode-multi-review` package (`exports: { ".": "./index.ts" }`). In this repo, the root `opencode.jsonc` loads it via `"plugins": ["."]`; other repos configure it explicitly as shown above.
+The plugin source lives at the repo root (`index.ts` + flat modules) and is published as the `opencode-multi-review` package (`exports: { ".": "./index.ts" }`). In this repo the plugin loads via auto-discovery: `.opencode/plugins/multi-review.ts` re-exports the root sources, so no `plugins` config entry is needed. Other repos get a vendored snapshot as shown above.
