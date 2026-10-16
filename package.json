@@ -1,0 +1,20 @@
+{
+  "name": "opencode-multi-review",
+  "version": "0.1.0",
+  "description": "OpenCode V2 plugin: runs multiple specialized reviewers (quality, bugs, spec adherence, architecture, security) concurrently over the current diff or an explicit target, and returns one consolidated markdown report",
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@opencode/plugin": "^2.0.30"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  }
+}
