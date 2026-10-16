@@ -28,7 +28,7 @@ export default Plugin.define({
             "",
             "To run a review, provide what to review:",
             "",
-            "- `/review <task description>` — the prompt text is used as the task spec the reviewers check against.",
+            "- `/multi-review <task description>` — the prompt text is used as the task spec the reviewers check against.",
             "- `multi_review` tool — pass `target` (explicit code/text to review) and/or `spec` (the task or requirements the change is supposed to implement).",
             "",
             "Without an explicit target or spec, the working-diff mode requires uncommitted changes in a repository.",
@@ -39,23 +39,46 @@ export default Plugin.define({
       }
     }
 
-    // Human entry point: /review [task description]
-    // The command's prompt text is treated as the spec for the `spec` reviewer.
+    // Human entry point: /multi-review [task description]
+    // The command submits a prompt to the invoking session that instructs the
+    // agent to call the multi_review tool — running the review inside the
+    // session's own agent loop keeps the session status busy until the report
+    // is delivered. The command's prompt text is treated as the spec for the
+    // `spec` reviewer.
     await ctx.command.transform((editor) => {
       editor.add({
-        name: "review",
+        name: "multi-review",
         description:
           "Run specialized multi-perspective reviewers (quality, bugs, spec adherence, architecture, security) over the current changes and post one consolidated report. The prompt text is used as the task spec.",
         execute: async ({ sessionID, prompt }) => {
           const spec = prompt.text.trim()
+          const instruction = spec
+            ? [
+                "Use the multi_review tool to review the current changes against this task spec:",
+                "",
+                "<spec>",
+                spec,
+                "</spec>",
+                "",
+                "When it returns, relay the full consolidated markdown report verbatim as your response.",
+              ].join("\n")
+            : "Use the multi_review tool to review the current working diff (no spec). When it returns, relay the full consolidated markdown report verbatim as your response."
           try {
-            const report = await execute(sessionID, { spec: spec || undefined })
-            await ctx.session.synthetic({ sessionID, text: report })
-          } catch (error) {
-            await ctx.session.synthetic({
-              sessionID,
-              text: `**multi-review could not run.** ${error instanceof Error ? error.message : String(error)}`,
-            })
+            await ctx.session.prompt({ sessionID, text: instruction })
+          } catch {
+            // The agent loop could not run (e.g. session already busy or no
+            // model configured) — fall back to running the review directly in
+            // this hook and posting the report synthetically. The session may
+            // not stay visibly busy, but the review still completes.
+            try {
+              const report = await execute(sessionID, { spec: spec || undefined })
+              await ctx.session.synthetic({ sessionID, text: report })
+            } catch (error) {
+              await ctx.session.synthetic({
+                sessionID,
+                text: `**multi-review could not run.** ${error instanceof Error ? error.message : String(error)}`,
+              })
+            }
           }
         },
       })
@@ -100,7 +123,7 @@ export default Plugin.define({
     })
 
     console.log(
-      `multi-review plugin loaded: /review command + multi_review tool (${REVIEWERS.map((r) => r.id).join(", ")})`,
+      `multi-review plugin loaded: /multi-review command + multi_review tool (${REVIEWERS.map((r) => r.id).join(", ")})`,
     )
   },
 })
