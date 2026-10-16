@@ -89,9 +89,17 @@ That's it — the new id is immediately valid in the `multi_review` tool input, 
 
 ## Use in another repo
 
-This repo is a self-contained OpenCode plugin package (`opencode-multi-review`). Load it from any repo's `opencode.json(c)`:
+This repo is a self-contained OpenCode plugin package (`opencode-multi-review`). The quickest way to install it into another project:
 
-**Local path** (while iterating on the plugin):
+```bash
+# reference this repo by path (stays in sync with changes here)
+bash /Users/saputrad/repo/playground/common-tools/install.sh /path/to/project
+
+# or vendor a snapshot into the target's .opencode/plugins/multi-review/
+bash /Users/saputrad/repo/playground/common-tools/install.sh /path/to/project --copy
+```
+
+The installer merges the plugin into the target's `opencode.json(c)` (JSONC-aware, backs up existing config). Or configure it manually:
 
 ```jsonc
 {
